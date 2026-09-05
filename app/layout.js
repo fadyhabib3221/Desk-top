@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth";
 import { Toaster } from "react-hot-toast";
 import LicenseGate from "@/components/LicenseGate";
 import TopLoader from "@/components/TopLoader";
+import UpdateChecker from "@/components/UpdateChecker";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -21,6 +22,7 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased bg-gray-50 text-gray-900`}>
         <AuthProvider>
+          <UpdateChecker />
           <Suspense fallback={null}>
             <TopLoader />
           </Suspense>

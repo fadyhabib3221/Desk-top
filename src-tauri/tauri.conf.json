@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Travel Agency Management",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.travelagency.management",
   "build": {
     "frontendDist": "../out",
@@ -22,7 +22,16 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://*.googleapis.com https://*.google.com https://*.firebaseio.com https://*.firebaseapp.com https://firestore.googleapis.com wss://*.firebaseio.com; img-src 'self' data: https: blob:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' https://*.googleapis.com https://*.google.com https://*.firebaseio.com https://*.firebaseapp.com https://firestore.googleapis.com wss://*.firebaseio.com https://github.com https://objects.githubusercontent.com https://release-assets.githubusercontent.com; img-src 'self' data: https: blob:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; font-src 'self' data:"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/fadyhabib3221/Desk-top/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2NkE1OTkwQkM3QTMzRjgKUldUNE0zcThrRmxxRnM1SHpkaWlqNGI3N2Vrb2d2RzU0RjRGOHNIQzNvRTlmbEJBRDRlbW5oUXkK"
     }
   },
   "bundle": {

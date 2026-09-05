@@ -1,0 +1,81 @@
+name: بناء تطبيق الديسك توب (Windows / macOS / Linux)
+
+# يشتغل تلقائيًا لما تعمل push لتاج بيبدأ بـ v (مثل v1.0.0) — وده بيعمل Release جاهز فيه الملفات التلاتة
+# وممكن كمان تشغّله يدويًا من تبويب Actions في GitHub بدون عمل تاج (workflow_dispatch)
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# صلاحية إنشاء Release وتحميل الملفات عليه
+permissions:
+  contents: write
+
+jobs:
+  build-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "windows-latest"
+            args: ""
+          - platform: "macos-latest"
+            args: "--target universal-apple-darwin" # بيبني نسخة واحدة تشتغل على Intel وApple Silicon معًا
+          - platform: "ubuntu-22.04"
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: تحميل الكود
+        uses: actions/checkout@v4
+
+      - name: تثبيت Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: تثبيت متطلبات النظام (Linux فقط)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libsoup-3.0-dev build-essential curl wget file
+
+      - name: تثبيت Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # على ماك بنضيف الـ targets الخاصة بـ Intel وApple Silicon عشان الـ universal build
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: تسريع البناء عن طريق كاش Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: تثبيت مكتبات المشروع (npm)
+        run: npm ci
+
+      # لو بعدين نقلت إعدادات Firebase لمتغيرات بيئة (.env)، فك التعليق عن السطور دي
+      # وضيف القيم كـ Secrets في إعدادات الريبو (Settings > Secrets and variables > Actions)
+      # - name: إعداد متغيرات Firebase
+      #   run: |
+      #     echo "NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}" >> .env.production
+      #     echo "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ secrets.FIREBASE_AUTH_DOMAIN }}" >> .env.production
+      #     echo "NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> .env.production
+
+      - name: بناء تطبيق الديسك توب
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # مفتاح توقيع التحديثات — لازم تضيفه كـ Secret في إعدادات الريبو (اسمه بالظبط زي كده)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "إصدار v__VERSION__"
+          releaseBody: "تم إنشاء الملفات تلقائيًا لأنظمة Windows وmacOS وLinux. التطبيقات المنصّبة مسبقًا هتتحدّث لوحدها تلقائيًا."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}
