@@ -56,18 +56,6 @@ jobs:
       - name: تثبيت مكتبات المشروع (npm)
         run: npm ci
 
-      - name: تشخيص - تأكد من وصول مفتاح التوقيع (بدون كشف القيمة)
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          echo "طول المفتاح (بالحروف): ${#TAURI_SIGNING_PRIVATE_KEY}"
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "تحذير: المفتاح فاضي أو مش موجود!"
-          else
-            echo "المفتاح موجود ووصل للـ workflow."
-          fi
-
       # لو بعدين نقلت إعدادات Firebase لمتغيرات بيئة (.env)، فك التعليق عن السطور دي
       # وضيف القيم كـ Secrets في إعدادات الريبو (Settings > Secrets and variables > Actions)
       # - name: إعداد متغيرات Firebase
