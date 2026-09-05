@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@tauri-apps/plugin-process": "^2",
