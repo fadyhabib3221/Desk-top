@@ -36,7 +36,6 @@ import {
   Eye,
   EyeOff,
   User,
-  Mail,
   Crown,
   Lock,
   QrCode,
@@ -55,7 +54,6 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
   updatePassword,
-  sendPasswordResetEmail,
 } from "firebase/auth";
 
 const ROLES = ["Admin", "General Manager", "Manager", "Accountant", "Employee"];
@@ -108,7 +106,7 @@ export default function SettingsPage() {
   const [addLoading, setAddLoading] = useState(false);
 
   // Edit form
-  const [editForm, setEditForm] = useState({ username: "", name: "", email: "", role: "Employee", branches: [] });
+  const [editForm, setEditForm] = useState({ username: "", name: "", role: "Employee", branches: [] });
   const [editLoading, setEditLoading] = useState(false);
 
   // Branches management (new tab)
@@ -259,25 +257,13 @@ export default function SettingsPage() {
       toast.error("Password must be at least 6 characters");
       return;
     }
-    // Email is optional — if left blank, auto-generate an internal
-    // placeholder from the username so login still works via username
-    // (Firebase Auth itself still requires *some* email internally).
-    let email = addForm.email.toLowerCase().trim();
-    if (email) {
-      if (!email.includes("@")) {
-        toast.error("Invalid email");
-        return;
-      }
-    } else {
-      email = `${username}@noemail.local`;
-    }
+    // No email is collected in this form — Firebase Auth still needs *some*
+    // email internally, so we derive an internal placeholder from the
+    // username. It's never shown anywhere in the app.
+    const email = `${username}@noemail.local`;
     // Check uniqueness locally first
     if (users.some((u) => u.username === username)) {
       toast.error("Username already taken");
-      return;
-    }
-    if (users.some((u) => u.email === email)) {
-      toast.error("Email already in use");
       return;
     }
 
@@ -333,7 +319,6 @@ export default function SettingsPage() {
     setEditForm({
       username: u.username || "",
       name: u.name || "",
-      email: u.email || "",
       role: u.role || "Employee",
       branches: u.branches || [],
     });
@@ -342,7 +327,6 @@ export default function SettingsPage() {
   const handleEdit = async (e) => {
     e.preventDefault();
     const username = editForm.username.toLowerCase().trim();
-    const email = editForm.email.toLowerCase().trim();
     if (!/^[a-z0-9_.]{3,20}$/.test(username)) {
       toast.error("Invalid username format");
       return;
@@ -356,7 +340,6 @@ export default function SettingsPage() {
       await updateUser(showEdit.id, {
         username,
         name: editForm.name.trim(),
-        email,
         role: editForm.role,
         branches: editForm.branches,
       });
@@ -512,24 +495,15 @@ export default function SettingsPage() {
     }
     setResetLoading(true);
     try {
-      // For admin resetting another user: we cannot directly update that user's Auth password client-side.
-      // We attempt to send password reset email and store a flag.
+      // We cannot directly update another user's Auth password client-side
+      // (that needs the Admin SDK), so we flag the account and store a
+      // temporary password the admin can hand to the employee directly.
       const target = showReset;
       await updateDoc(doc(db, "users", target.id), {
         passwordResetRequestedAt: new Date().toISOString(),
         mustChangePassword: true,
       });
-      // Also try sending reset email if email exists
-      if (target.email) {
-        try {
-          await sendPasswordResetEmail(auth, target.email);
-          toast.success(`Password reset email sent to ${target.email}. New password also noted for admin.`);
-        } catch (emailErr) {
-          toast.success("Reset flag set. Ask user to use 'Forgot password' or contact admin.");
-        }
-      } else {
-        toast.success("Reset flag set successfully");
-      }
+      toast.success("Reset flag set successfully");
       // For demo, if admin wants to set new password directly, we store it as temporaryPassword (not secure, demo only)
       await updateDoc(doc(db, "users", target.id), {
         temporaryPassword: resetPw, // DEMO ONLY - in production use Firebase Admin SDK
@@ -539,7 +513,7 @@ export default function SettingsPage() {
         username: userData?.username,
         name: userData?.name,
         action: "password_reset",
-        meta: { targetUserId: target.id, targetName: target.name || target.username || target.email },
+        meta: { targetUserId: target.id, targetName: target.name || target.username },
       });
       setShowReset(null);
       setResetPw("");
@@ -669,7 +643,7 @@ export default function SettingsPage() {
       return;
     }
     const secret = generateTOTPSecret();
-    const label = userData?.username || user?.email || "user";
+    const label = userData?.username || "user";
     const totp = new OTPAuth.TOTP({
       issuer: "TravelAgency",
       label,
@@ -1332,16 +1306,6 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Email</label>
-                <input
-                  required
-                  type="email"
-                  value={editForm.email}
-                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
                 <label className="block text-sm font-medium mb-1">Role</label>
                 <select
                   value={editForm.role}
@@ -1406,7 +1370,7 @@ export default function SettingsPage() {
             </div>
             <form onSubmit={handleResetPassword} className="p-6 space-y-4">
               <p className="text-sm text-gray-500">
-                Set a temporary password for <b>{showReset.email}</b>. A reset email will also be sent. User should change it on next login.
+                Set a temporary password for <b>@{showReset.username}</b>. User should change it on next login.
               </p>
               <div>
                 <label className="block text-sm font-medium mb-1">New Password</label>
@@ -1551,9 +1515,6 @@ function MyAccountCard({ userData, onChangePassword, onToggle2FA }) {
             <div className="mt-2 space-y-1 text-sm text-gray-600">
               <p className="flex items-center gap-2">
                 <User size={14} className="text-gray-400" /> <span className="font-mono">@{userData.username || "-"}</span>
-              </p>
-              <p className="flex items-center gap-2">
-                <Mail size={14} className="text-gray-400" /> {userData.email}
               </p>
               <p className="flex items-center gap-2">
                 {userData.totpEnabled ? (

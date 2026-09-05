@@ -122,7 +122,7 @@ export default function LicenseControlPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
         <div className="max-w-sm w-full bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center">
           <p className="text-gray-300 text-sm mb-4">
-            Signed in as <span className="text-gray-100">{user.email}</span> — this account is not
+            Signed in as <span className="text-gray-100">@{userData?.username}</span> — this account is not
             authorized for this page.
           </p>
           <button
