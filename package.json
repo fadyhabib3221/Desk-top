@@ -1,6 +1,6 @@
 {
   "name": "travel-agency-management",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -12,6 +12,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
     "date-fns": "^4.1.0",

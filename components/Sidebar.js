@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import CurrencyConverter from "@/components/CurrencyConverter";
+import { version as appVersion } from "@/package.json";
 import {
   LayoutDashboard,
   Users,
@@ -104,6 +105,7 @@ export default function Sidebar() {
           <LogOut size={18} />
           <span>Logout</span>
         </button>
+        <p className="text-center text-xs text-slate-500 pt-2">v{appVersion}</p>
       </div>
     </aside>
   );

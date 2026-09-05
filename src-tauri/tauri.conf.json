@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Travel Agency Management",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.travelagency.management",
   "build": {
     "frontendDist": "../out",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "نظام إدارة الوكالة السياحية",
+        "title": "Travel Agency Management",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,

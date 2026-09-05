@@ -2,18 +2,28 @@
 
 import { useEffect } from "react";
 import toast from "react-hot-toast";
+import { version as appVersion } from "@/package.json";
 
 /**
  * بيتشيك على تحديثات جديدة للتطبيق عند فتحه (بس لما يكون شغال جوه Tauri
  * كتطبيق ديسك توب — مش هيعمل حاجة لو التطبيق شغال في متصفح عادي).
  * لو لقى نسخة أحدث على GitHub Releases، بيحمّلها ويثبتها ويعيد فتح
- * التطبيق تلقائيًا.
+ * التطبيق تلقائيًا. كمان بيحطّ رقم الإصدار في عنوان النافذة.
  */
 export default function UpdateChecker() {
   useEffect(() => {
     if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) return;
 
     let cancelled = false;
+
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().setTitle(`Travel Agency Management v${appVersion}`);
+      } catch (err) {
+        console.error("Failed to set window title:", err);
+      }
+    })();
 
     (async () => {
       try {
