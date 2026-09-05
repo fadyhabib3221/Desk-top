@@ -31,13 +31,20 @@
       "endpoints": [
         "https://github.com/fadyhabib3221/Desk-top/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2NkE1OTkwQkM3QTMzRjgKUldUNE0zcThrRmxxRnM1SHpkaWlqNGI3N2Vrb2d2RzU0RjRGOHNIQzNvRTlmbEJBRDRlbW5oUXkK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIzOUIwNzcxNEY3QUJGNTEKUldSUnYzcFBjUWViSTlhYnhWQlM5a2lHd20vYnltOXR4SEpSeDhQQ1loSnhkRnVyTnVtRjFQcVoK"
     }
   },
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["msi", "nsis", "dmg", "app", "deb", "appimage"],
+    "targets": [
+      "msi",
+      "nsis",
+      "dmg",
+      "app",
+      "deb",
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
