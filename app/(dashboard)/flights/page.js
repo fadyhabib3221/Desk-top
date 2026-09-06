@@ -2545,19 +2545,18 @@ export default function FlightsPage() {
                         <th className="th text-right border border-slate-300">Fare</th>
                         <th className="th text-right border border-slate-300">Tax</th>
                         <th className="th text-right border border-slate-300">Service</th>
+                        <th className="th text-right border border-slate-300">Sell Cur</th>
                         <th className="th text-right border border-slate-300">Sell</th>
+                        <th className="th text-right border border-slate-300">Buy Cur</th>
                         <th className="th text-right border border-slate-300">Buy</th>
                         <th className="th text-right border border-slate-300">Profit</th>
-                        <th className="th border border-slate-300">From</th>
-                        <th className="th border border-slate-300">To</th>
-                        <th className="th border border-slate-300">Flight</th>
                         <th className="th border border-slate-300">Salesman</th>
                         <th className="th border border-slate-300">Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filtered.length === 0 ? (
-                        <tr><td colSpan={19} className="px-4 py-10 text-center text-gray-400">No records. Click New to create.</td></tr>
+                        <tr><td colSpan={18} className="px-4 py-10 text-center text-gray-400">No records. Click New to create.</td></tr>
                       ) : filtered.map((row, idx) => {
                         const totals = getEffectiveTotals(row);
                         const rawTotals = getRowTotals(row);
@@ -2577,12 +2576,21 @@ export default function FlightsPage() {
                           <td className="td text-right border border-slate-200" title="Per ADT fare">{fmt(row.fareValue)}</td>
                           <td className="td text-right border border-slate-200" title="Per ADT tax">{fmt(row.taxes)}</td>
                           <td className="td text-right border border-slate-200">{fmt(row.serviceFee)}</td>
-                          <td className="td text-right font-medium border border-slate-200" title={`Per ADT ${fmt(row.sellPrice)} × ${totals.adt}${totals.chd?` + CHD ${fmt(row.sellPriceCHD)}×${totals.chd}`:""}${totals.inf?` + INF ${fmt(row.sellPriceINF)}×${totals.inf}`:""}`}>{fmt(totals.totalSell)}</td>
-                          <td className="td text-right border border-slate-200" title={`Per ADT ${fmt(row.buyPrice)} × ${totals.adt}${totals.chd?` + CHD ${fmt(row.buyPriceCHD)}×${totals.chd}`:""}${totals.inf?` + INF ${fmt(row.buyPriceINF)}×${totals.inf}`:""}`}>{fmt(totals.totalBuy)}</td>
+                          <td className="td text-right border border-slate-200 text-slate-500 font-mono">{row.sellCurrency || row.currency || "EGP"}</td>
+                          <td className="td text-right font-medium border border-slate-200" title={`Per ADT ${fmt(row.sellPrice)} × ${totals.adt}${totals.chd?` + CHD ${fmt(row.sellPriceCHD)}×${totals.chd}`:""}${totals.inf?` + INF ${fmt(row.sellPriceINF)}×${totals.inf}`:""}`}>
+                            {fmt(totals.totalSell)}
+                            {(row.sellCurrency || row.currency || "EGP") !== "EGP" && (
+                              <div className="text-[9px] text-slate-400 font-normal leading-tight">≈{fmt(totals.totalSell * (parseFloat(row.sellExchangeRate) || 1))} EGP</div>
+                            )}
+                          </td>
+                          <td className="td text-right border border-slate-200 text-slate-500 font-mono">{row.buyCurrency || row.currency || "EGP"}</td>
+                          <td className="td text-right border border-slate-200" title={`Per ADT ${fmt(row.buyPrice)} × ${totals.adt}${totals.chd?` + CHD ${fmt(row.buyPriceCHD)}×${totals.chd}`:""}${totals.inf?` + INF ${fmt(row.buyPriceINF)}×${totals.inf}`:""}`}>
+                            {fmt(totals.totalBuy)}
+                            {(row.buyCurrency || row.currency || "EGP") !== "EGP" && (
+                              <div className="text-[9px] text-slate-400 font-normal leading-tight">≈{fmt(totals.totalBuy * (parseFloat(row.buyExchangeRate) || 1))} EGP</div>
+                            )}
+                          </td>
                           <td className={`td text-right font-medium border border-slate-200 ${totals.totalProfit >= 0 ? "text-green-600" : "text-red-600"}`} title={`Total Profit = Total Sell - Total Buy`}>{fmt(totals.totalProfit)}</td>
-                          <td className="td border border-slate-200">{row.from || "-"}</td>
-                          <td className="td border border-slate-200">{row.to || "-"}</td>
-                          <td className="td border border-slate-200">{row.flightNo || "-"}</td>
                           <td className="td border border-slate-200">{row.salesmanName || row.salesman || "-"}</td>
                           <td className="td border border-slate-200">
                             <span className={`badge text-[10px] ${row.status === "Confirmed" ? "badge-green" : row.status === "Refunded" ? "badge bg-amber-100 text-amber-700 border-amber-300" : row.status === "Void" ? "badge bg-red-100 text-red-700 border-red-300" : row.status === "Pending" ? "badge-yellow" : row.status === "Cancelled" ? "badge-red" : "badge-gray"}`}>
