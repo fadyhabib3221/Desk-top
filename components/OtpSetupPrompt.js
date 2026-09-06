@@ -40,7 +40,7 @@ export default function OtpSetupPrompt() {
 
   const handleStartSetup = async () => {
     const secret = generateTOTPSecret();
-    const label = userData?.username || user?.email || "user";
+    const label = userData?.username || "user";
     const totp = new OTPAuth.TOTP({
       issuer: "TravelAgency",
       label,

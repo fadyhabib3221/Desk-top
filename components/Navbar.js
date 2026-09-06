@@ -8,7 +8,6 @@ import QRCode from "qrcode";
 import CurrencyConverter from "@/components/CurrencyConverter";
 import {
   User,
-  Mail,
   Crown,
   Lock,
   ShieldCheck,
@@ -124,7 +123,7 @@ export default function Navbar({ title }) {
       return;
     }
     const secret = generateTOTPSecret();
-    const label = userData?.username || user?.email || "user";
+    const label = userData?.username || "user";
     const totp = new OTPAuth.TOTP({
       issuer: "TravelAgency",
       label,
@@ -235,7 +234,7 @@ export default function Navbar({ title }) {
               <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center">
                 <User size={16} />
               </div>
-              <span className="hidden sm:inline font-medium">{userData?.name || user?.email || "User"}</span>
+              <span className="hidden sm:inline font-medium">{userData?.name || userData?.username || "User"}</span>
               <ChevronDown size={14} className={`text-gray-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
 
@@ -252,7 +251,7 @@ export default function Navbar({ title }) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-gray-900 text-sm flex items-center gap-1.5 flex-wrap">
-                      <span className="truncate">{userData?.name || user?.email || "User"}</span>
+                      <span className="truncate">{userData?.name || userData?.username || "User"}</span>
                       {userData?.role && userData.role !== "Employee" && (
                         <span className="inline-flex items-center gap-1 bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap">
                           <Crown size={10} /> {userData.role}
@@ -261,11 +260,6 @@ export default function Navbar({ title }) {
                     </p>
                     {userData?.username && (
                       <p className="text-xs font-mono text-gray-500 truncate">@{userData.username}</p>
-                    )}
-                    {userData?.email && (
-                      <p className="text-xs text-gray-500 truncate flex items-center gap-1 mt-0.5">
-                        <Mail size={10} className="flex-shrink-0" /> {userData.email}
-                      </p>
                     )}
                     <div className="mt-1.5">
                       {userData?.totpEnabled ? (

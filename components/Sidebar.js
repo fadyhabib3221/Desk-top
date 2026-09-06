@@ -36,9 +36,18 @@ const menuItems = [
   { href: "/settings", label: "Settings", icon: Settings, key: "settings" },
 ];
 
+function getUserInitials(name) {
+  if (!name || typeof name !== "string") return "TA";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "TA";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const { userData, logout, canAccessModule } = useAuth();
+  const userInitials = getUserInitials(userData?.name);
 
   return (
     <aside className="fixed top-0 left-0 z-40 w-64 h-screen bg-slate-800 text-white flex flex-col">
@@ -57,7 +66,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
         <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-lg">
-          TA
+          {userInitials}
         </div>
         <div>
           <h1 className="font-semibold text-sm leading-tight">Travel Agency Management</h1>

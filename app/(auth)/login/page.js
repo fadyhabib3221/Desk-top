@@ -10,7 +10,6 @@ import { Plane, Eye, EyeOff, ShieldCheck, ArrowLeft } from "lucide-react";
 
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState("");
-  const [email, setEmail] = useState(""); // for first-time admin
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
@@ -119,14 +118,16 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      await register({ email: email.trim(), password, name: name.trim(), username: username.trim(), role: "Admin" });
+      // No email is collected from the user — Firebase Auth still needs
+      // *some* email internally, so we derive an internal placeholder from
+      // the username. It's never shown anywhere in the app.
+      const generatedEmail = `${username.trim().toLowerCase()}@noemail.local`;
+      await register({ email: generatedEmail, password, name: name.trim(), username: username.trim(), role: "Admin" });
       toast.success("Admin account created successfully!");
       router.replace("/");
     } catch (error) {
       console.error(error);
-      if (error.code === "auth/email-already-in-use") {
-        toast.error("Email already in use");
-      } else if (error.code === "auth/weak-password") {
+      if (error.code === "auth/weak-password") {
         toast.error("Password should be at least 6 characters");
       } else if (error.message?.includes("Username")) {
         toast.error(error.message);
@@ -190,18 +191,6 @@ export default function LoginPage() {
                 placeholder="admin_user"
               />
               <p className="text-xs text-gray-400 mt-1">3-20 chars, letters/numbers/_ . only, stored lowercase</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{"Email"}</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                placeholder="admin@example.com"
-              />
             </div>
 
             <div>

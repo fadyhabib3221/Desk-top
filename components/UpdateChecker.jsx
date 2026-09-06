@@ -29,16 +29,9 @@ export default function UpdateChecker() {
       try {
         const { check } = await import("@tauri-apps/plugin-updater");
         const { relaunch } = await import("@tauri-apps/plugin-process");
-        const { ask } = await import("@tauri-apps/plugin-dialog");
 
         const update = await check();
         if (cancelled || !update) return;
-
-        const userConfirmed = await ask(
-          `تحديث جديد متاح (v${update.version}). هل تريد تحميله وتثبيته الآن؟`,
-          { title: "تحديث التطبيق", kind: "info", okLabel: "تحديث الآن", cancelLabel: "لاحقًا" }
-        );
-        if (cancelled || !userConfirmed) return;
 
         toast.loading(`جاري تحميل التحديث ${update.version}...`, {
           id: "app-update",

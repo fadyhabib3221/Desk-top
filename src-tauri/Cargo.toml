@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.4"
+version = "1.0.6"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -25,7 +25,6 @@ tauri = { version = "2.11.3" }
 tauri-plugin-log = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-tauri-plugin-dialog = "2"
 
 # تحسينات لتقليل حجم وذاكرة الـ binary النهائي (يفيد فقط في release build)
 [profile.release]
