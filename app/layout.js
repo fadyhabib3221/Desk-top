@@ -6,6 +6,7 @@ import { Toaster } from "react-hot-toast";
 import LicenseGate from "@/components/LicenseGate";
 import TopLoader from "@/components/TopLoader";
 import UpdateChecker from "@/components/UpdateChecker";
+import IdleLogout from "@/components/IdleLogout";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -23,6 +24,7 @@ export default function RootLayout({ children }) {
       <body className={`${inter.variable} font-sans antialiased bg-gray-50 text-gray-900`}>
         <AuthProvider>
           <UpdateChecker />
+          <IdleLogout />
           <Suspense fallback={null}>
             <TopLoader />
           </Suspense>
