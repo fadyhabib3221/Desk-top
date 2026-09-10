@@ -63,6 +63,7 @@ export default function SettingsPage() {
     user,
     userData,
     hasPermission,
+    canAccessModule,
     register,
     updateUser,
     verifyTOTP,
@@ -139,6 +140,12 @@ export default function SettingsPage() {
 
   const isAdmin = hasPermission(["Admin"]);
   const canSeeLicense = canViewLicenseStatus(userData);
+  // Non-Admins can now be individually granted Reports and/or Backup access
+  // (Settings > Employees > Permissions) — every other Settings tab stays
+  // Admin-level-only. isAdmin already implies both, but we keep the
+  // explicit check inline below for clarity at each usage site.
+  const canReports = isAdmin || canAccessModule("reports");
+  const canBackup = isAdmin || canAccessModule("backup");
   // General Manager has every other Admin-level permission except this one:
   // Admin accounts are invisible and unreachable to them in the Employees
   // list — only a true Admin can see or manage another Admin.
@@ -732,7 +739,7 @@ export default function SettingsPage() {
                 Branches
               </button>
             )}
-            {isAdmin && (
+            {canBackup && (
               <button
                 onClick={() => setActiveTab("backup")}
                 className={`pb-3 px-1 text-sm font-medium border-b-2 transition ${
@@ -768,7 +775,7 @@ export default function SettingsPage() {
                 License
               </button>
             )}
-            {isAdmin && (
+            {canReports && (
               <button
                 onClick={() => setActiveTab("reports")}
                 className={`pb-3 px-1 text-sm font-medium border-b-2 transition ${
@@ -1126,11 +1133,11 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {activeTab === "reports" && isAdmin && <ReportsTab />}
+        {activeTab === "reports" && canReports && <ReportsTab />}
 
         {activeTab === "history" && isAdmin && <HistoryTab />}
 
-        {activeTab === "backup" && isAdmin && <BackupRestoreTab />}
+        {activeTab === "backup" && canBackup && <BackupRestoreTab />}
 
         </div>
       </div>

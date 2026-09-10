@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Navbar from "@/components/Navbar";
 import ClientsSection from "@/components/crm/ClientsSection";
 import CorporatesSection from "@/components/crm/CorporatesSection";
@@ -9,17 +9,34 @@ import { useAuth, ADMIN_LEVEL_ROLES } from "@/lib/auth";
 import { canWriteModule } from "@/lib/permissions";
 import { Users, Building2, Truck } from "lucide-react";
 
-const TABS = [
+const ALL_TABS = [
   { key: "clients", label: "Clients", icon: Users },
   { key: "corporates", label: "Corporates", icon: Building2 },
   { key: "suppliers", label: "Suppliers", icon: Truck },
 ];
 
 export default function CRMPage() {
-  const { userData } = useAuth();
+  const { userData, canAccessModule } = useAuth();
   const isAdmin = ADMIN_LEVEL_ROLES.includes(userData?.role);
-  const canWrite = canWriteModule(userData, "crm", isAdmin);
-  const [activeTab, setActiveTab] = useState("clients");
+
+  // Each tab is its own permission now (clients / corporates / suppliers),
+  // so only show — and only allow switching to — the ones this user
+  // actually has. An employee with just "suppliers" granted sees a single
+  // tab, not three with two that go nowhere on click.
+  const tabs = useMemo(() => ALL_TABS.filter((t) => canAccessModule(t.key)), [canAccessModule]);
+
+  const [activeTab, setActiveTab] = useState(tabs[0]?.key || "clients");
+
+  // If the accessible set changes (e.g. permissions edited while this page
+  // is open) and the current tab is no longer in it, fall back to the
+  // first tab still available instead of showing a blank pane.
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.some((t) => t.key === activeTab)) {
+      setActiveTab(tabs[0].key);
+    }
+  }, [tabs, activeTab]);
+
+  const canWrite = canWriteModule(userData, activeTab, isAdmin);
 
   return (
     <div>
@@ -27,7 +44,7 @@ export default function CRMPage() {
 
       <div className="px-6 pt-4">
         <div className="border-b border-gray-200 flex gap-6">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const Icon = t.icon;
             return (
               <button

@@ -12,7 +12,7 @@ import { FileSpreadsheet, FileDown, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { exportTableToExcel, exportTableToPDF } from "@/lib/exportUtils";
 
-export default function ExportButtons({ targetRef, filename = "report", title = "", className = "" }) {
+export default function ExportButtons({ targetRef, filename = "report", title = "", meta = null, className = "" }) {
   const [busy, setBusy] = useState(null); // "excel" | "pdf" | null
 
   const handleExcel = async () => {
@@ -31,7 +31,7 @@ export default function ExportButtons({ targetRef, filename = "report", title = 
   const handlePDF = async () => {
     setBusy("pdf");
     try {
-      const ok = await exportTableToPDF(targetRef.current, filename, title);
+      const ok = await exportTableToPDF(targetRef.current, filename, title, meta);
       if (!ok) toast.error("No table to export in this view");
     } catch (err) {
       console.error(err);

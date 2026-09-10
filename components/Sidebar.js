@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { canAccessAnyModule, CRM_ROUTE_KEYS, SETTINGS_ROUTE_KEYS } from "@/lib/permissions";
 import CurrencyConverter from "@/components/CurrencyConverter";
 import { version as appVersion } from "@/package.json";
 import {
@@ -21,6 +22,16 @@ import {
   LogOut,
   CalendarClock,
 } from "lucide-react";
+// First letter of each of the first two words in the employee's name, e.g.
+// "fady habib" -> "FH". Falls back to "TA" (the app's own initials) before
+// userData has loaded or for a single-word/blank name.
+function getInitials(name) {
+  if (!name || !name.trim()) return "TA";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 const menuItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, key: "dashboard" },
   { href: "/crm", label: "CRM", icon: Users, key: "crm" },
@@ -36,18 +47,9 @@ const menuItems = [
   { href: "/settings", label: "Settings", icon: Settings, key: "settings" },
 ];
 
-function getUserInitials(name) {
-  if (!name || typeof name !== "string") return "TA";
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "TA";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
 export default function Sidebar() {
   const pathname = usePathname();
-  const { userData, logout, canAccessModule } = useAuth();
-  const userInitials = getUserInitials(userData?.name);
+  const { userData, logout, canAccessModule, isAdmin, appFeatures } = useAuth();
 
   return (
     <aside className="fixed top-0 left-0 z-40 w-64 h-screen bg-slate-800 text-white flex flex-col">
@@ -66,7 +68,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
         <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-lg">
-          {userInitials}
+          {getInitials(userData?.name)}
         </div>
         <div>
           <h1 className="font-semibold text-sm leading-tight">Travel Agency Management</h1>
@@ -80,7 +82,13 @@ export default function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-4 px-3">
         <ul className="space-y-1">
           {menuItems.map((item) => {
-            if (!canAccessModule(item.key)) return null;
+            if (item.key === "crm") {
+              if (!canAccessAnyModule(userData, CRM_ROUTE_KEYS, isAdmin, appFeatures)) return null;
+            } else if (item.key === "settings") {
+              if (!canAccessAnyModule(userData, SETTINGS_ROUTE_KEYS, isAdmin, appFeatures)) return null;
+            } else if (!canAccessModule(item.key)) {
+              return null;
+            }
 
             const isActive = pathname === item.href;
             const Icon = item.icon;
