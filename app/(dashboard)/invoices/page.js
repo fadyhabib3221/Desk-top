@@ -472,6 +472,37 @@ export default function InvoicesPage() {
       toast.success(`Invoice issued: ${inv.fullNumber} (${selectedItems.length} service${selectedItems.length > 1 ? "s" : ""})`);
       setShowNewModal(false);
       setSelectedIds(new Set());
+      // Go straight into the document view (Description/Pax/Amount/Tax/
+      // Payable table + Sum row) instead of just dropping back to the
+      // list — issuing an invoice should immediately show the invoice.
+      setPrintPreview({
+        docId: null,
+        collection: selectedItems.length > 1 ? "invoices" : selectedItems[0].collection,
+        branch,
+        invoiceNumber: inv.fullNumber,
+        numberPrefix: inv.numberPrefix,
+        sequentialNumber: inv.sequentialNumber,
+        issueDate: new Date().toISOString().slice(0, 10),
+        section: groupSection,
+        isCredit: false,
+        isVoid: false,
+        isPending: false,
+        clientCode: selectedItems[0].clientCode,
+        clientName: [...new Set(selectedItems.map((it) => it.clientName))].join(", "),
+        supplier: "",
+        amount: selectedTotal,
+        currency,
+        invoicePaid: false,
+        paidDate: "",
+        lines: selectedItems.map((it) => ({
+          description: it.description,
+          clientName: it.clientName,
+          amount: it.amount,
+          tax: it.tax || 0,
+          pax: it.pax,
+        })),
+        raw: {},
+      });
     } catch (e) {
       toast.error("Failed to issue invoice: " + (e.message || ""));
     } finally {
