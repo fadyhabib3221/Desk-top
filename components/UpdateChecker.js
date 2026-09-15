@@ -10,7 +10,7 @@ import toast from "react-hot-toast";
 // version published mid-session is caught without waiting for the next
 // manual restart. 15 minutes balances freshness against unnecessary
 // requests to GitHub's release feed.
-const CHECK_INTERVAL_MS = 2 * 60 * 1000;
+const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function UpdateChecker() {
   // Guards against two checks running at once (e.g. the interval firing

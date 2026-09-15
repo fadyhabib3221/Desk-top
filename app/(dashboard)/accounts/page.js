@@ -141,6 +141,13 @@ function normalizeRow(row, section) {
   const isVoid =
     String(row.status || "").toLowerCase().includes("void") ||
     String(row.ticketType || "").startsWith("V");
+  // Hotels/Visa/Transportation only ever have "Confirmed" or "Cancelled" as
+  // a status — there's no separate "Void" for them — so without this check
+  // a cancelled booking in any of those three modules (and a Cancelled,
+  // not-Void, flight) kept posting as real revenue/cost/AR/AP here, while
+  // the Reports tab correctly zeroed it out. Matching that here keeps both
+  // views in agreement.
+  const isCancelled = String(row.status || "").toLowerCase() === "cancelled";
 
   const buyCurrency = row.buyCurrency || row.currency || "EGP";
   const sellCurrency = row.sellCurrency || row.currency || "EGP";
@@ -162,7 +169,7 @@ function normalizeRow(row, section) {
   let buy = buyCurrency === "EGP" ? origBuy : toEGP(origBuy, buyCurrency, row, "buy");
   let sell = sellCurrency === "EGP" ? origSell : toEGP(origSell, sellCurrency, row, "sell");
 
-  if (isVoid) {
+  if (isVoid || isCancelled) {
     buy = 0;
     sell = 0;
     origBuy = 0;
@@ -181,7 +188,7 @@ function normalizeRow(row, section) {
   // buy/sell — previously it stayed positive on refund rows and threw off
   // the fee/VAT totals.
   let serviceFee = parseNum(row.serviceFee);
-  if (isVoid) serviceFee = 0;
+  if (isVoid || isCancelled) serviceFee = 0;
   else if (isRefund) serviceFee = -serviceFee;
 
   return {
@@ -243,8 +250,10 @@ function normalizeRow(row, section) {
     status: row.status || "",
     invoiceIssued: !!row.invoiceIssued,
     invoicePaid: !!row.invoicePaid,
+    paidDate: row.paidDate || "",
     isRefund,
     isVoid,
+    isCancelled,
     pax: row.pax || parseNum(row.adt) + parseNum(row.chd) + parseNum(row.inf) || 1,
     ageDays: daysBetween(
       row.issueDate || row.applicationDate || row.pickupDate || row.checkIn
@@ -280,30 +289,58 @@ function acctLine(accountCode, amount, normallyDebit) {
 }
 
 /**
- * Build the balanced double-entry lines for one operational transaction
- * (a flight/hotel/visa/transport row from `normalizeRow`). Posted the
- * moment the booking exists — invoiced or not — per how the agency wants
- * its books kept:
- *   Dr  Client-side account (AR if unpaid, Cash/Bank if paid)   sell + fee
- *   Cr  Sales – <section>                                       sell
- *   Cr  Service Fee Income                                      fee
- *   Dr  Cost of Sales – <section>                               buy
- *   Cr  Accounts Payable – Suppliers                             buy
- * Refund rows (negative buy/sell) automatically flip to the correct side
- * via acctLine(). Void rows contribute nothing (already zeroed upstream).
+ * Build the dated double-entry postings for one operational transaction
+ * (a flight/hotel/visa/transport row from `normalizeRow`). Returns an
+ * array of `{ date, lines }` postings rather than one flat line list,
+ * because a booking that starts unpaid and is later marked paid needs
+ * TWO separate dated entries — not one entry that silently "moves" to
+ * Cash/Bank at the booking's original date. Without this split, running
+ * Trial Balance / Cash & Bank / AR aging "as of" any date between the
+ * booking date and the actual payment date would incorrectly show the
+ * money as already collected before it really was.
+ *
+ * Posting 1 — always, dated at the booking itself:
+ *   Dr  Accounts Receivable – Clients                sell + fee
+ *   Cr  Sales – <section>                             sell
+ *   Cr  Service Fee Income                             fee
+ *   Dr  Cost of Sales – <section>                      buy
+ *   Cr  Accounts Payable – Suppliers                   buy
+ *
+ * Posting 2 — only once/if paid, dated at the actual payment date:
+ *   Dr  Cash on Hand / Bank – EGP                     sell + fee
+ *   Cr  Accounts Receivable – Clients                 sell + fee
+ *
+ * Refund rows (negative buy/sell) flip sides automatically via acctLine(),
+ * so a paid-out refund still nets AR back to zero once settled. Void/
+ * Cancelled rows contribute nothing (already zeroed upstream).
  */
-function buildTransactionJournalLines(row) {
-  const clientAccount = row.invoicePaid ? (row.isCC ? BANK_ACCOUNT : CASH_ACCOUNT) : AR_ACCOUNT;
+function buildTransactionJournalPostings(row) {
   const revenueAccount = row.isRefund ? CREDIT_NOTE_ACCOUNT : (REV_ACCOUNT_BY_SECTION[row.section] || "4000");
   const cogsAccount = COGS_ACCOUNT_BY_SECTION[row.section] || "5000";
-  const lines = [
-    acctLine(clientAccount, row.sell + (row.serviceFee || 0), true),
+  const clientTotal = row.sell + (row.serviceFee || 0);
+
+  const bookingLines = [
+    acctLine(AR_ACCOUNT, clientTotal, true),
     acctLine(revenueAccount, row.sell, false),
     acctLine(SERVICE_FEE_ACCOUNT, row.serviceFee || 0, false),
     acctLine(cogsAccount, row.buy, true),
     acctLine(AP_ACCOUNT, row.buy, false),
   ].filter(Boolean);
-  return lines;
+
+  const postings = [{ date: row.date, lines: bookingLines }];
+
+  if (row.invoicePaid) {
+    const settleAccount = row.isCC ? BANK_ACCOUNT : CASH_ACCOUNT;
+    const settleLines = [
+      acctLine(settleAccount, clientTotal, true),
+      acctLine(AR_ACCOUNT, clientTotal, false),
+    ].filter(Boolean);
+    // Falls back to the booking date only for old bookings marked paid
+    // before paidDate started being recorded — new ones always have it.
+    postings.push({ date: row.paidDate || row.date, lines: settleLines });
+  }
+
+  return postings.filter((p) => p.lines.length > 0);
 }
 
 const TABS = [
@@ -462,6 +499,38 @@ export default function AccountsPage() {
     });
   }, [allTx, search, dateFrom, dateTo, sectionFilter, currencyFilter, paidFilter]);
 
+  // Same filters as `filtered` above, MINUS the date range — used only to
+  // feed the ledger (Trial Balance/GL/P&L/Balance Sheet/AR/AP). A booking
+  // can now generate two postings on two different dates (see
+  // buildTransactionJournalPostings): the booking date and, once paid, the
+  // actual payment date. Filtering the source rows by date up front would
+  // wrongly drop a payment that lands inside the selected period just
+  // because its booking happened before it — so instead every row is kept
+  // here, and each individual POSTING is checked against dateFrom/dateTo
+  // by its own date below.
+  const filteredForLedger = useMemo(() => {
+    return allTx.filter((r) => {
+      if (sectionFilter !== "all" && r.section !== sectionFilter) return false;
+      if (currencyFilter !== "all" && r.currency !== currencyFilter) return false;
+      if (paidFilter === "paid" && !r.invoicePaid) return false;
+      if (paidFilter === "unpaid" && (!r.invoiceIssued || r.invoicePaid || r.isRefund))
+        return false;
+      if (paidFilter === "not_invoiced" && r.invoiceIssued) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        const hit =
+          (r.clientName || "").toLowerCase().includes(s) ||
+          (r.clientCode || "").toLowerCase().includes(s) ||
+          (r.supplierName || "").toLowerCase().includes(s) ||
+          (r.salesman || "").toLowerCase().includes(s) ||
+          (r.ref || "").toLowerCase().includes(s) ||
+          (r.description || "").toLowerCase().includes(s);
+        if (!hit) return false;
+      }
+      return true;
+    });
+  }, [allTx, search, sectionFilter, currencyFilter, paidFilter]);
+
   const totals = useMemo(() => {
     let sales = 0,
       cost = 0,
@@ -482,7 +551,7 @@ export default function AccountsPage() {
     const costBySection = { Flight: 0, Hotel: 0, Visa: 0, Transport: 0 };
 
     filtered.forEach((r) => {
-      if (r.isVoid) return;
+      if (r.isVoid || r.isCancelled) return;
       sales += r.sell;
       cost += r.buy;
       profit += r.profit;
@@ -533,14 +602,14 @@ export default function AccountsPage() {
       aging,
       salesBySection,
       costBySection,
-      count: filtered.filter((r) => !r.isVoid).length,
+      count: filtered.filter((r) => !r.isVoid && !r.isCancelled).length,
     };
   }, [filtered]);
 
   const byClient = useMemo(() => {
     const map = {};
     filtered.forEach((r) => {
-      if (r.isVoid) return;
+      if (r.isVoid || r.isCancelled) return;
       const key = r.clientCode || r.clientName || "Unknown";
       if (!map[key]) {
         map[key] = {
@@ -578,7 +647,7 @@ export default function AccountsPage() {
   const bySupplier = useMemo(() => {
     const map = {};
     filtered.forEach((r) => {
-      if (r.isVoid) return;
+      if (r.isVoid || r.isCancelled) return;
       const key = r.supplierCode || r.supplierName || "Unknown";
       if (!map[key]) {
         map[key] = {
@@ -601,7 +670,7 @@ export default function AccountsPage() {
   const bySalesman = useMemo(() => {
     const map = {};
     filtered.forEach((r) => {
-      if (r.isVoid) return;
+      if (r.isVoid || r.isCancelled) return;
       const key = r.salesman || "Unassigned";
       if (!map[key])
         map[key] = { name: key, sales: 0, cost: 0, profit: 0, count: 0, unpaid: 0 };
@@ -629,7 +698,7 @@ export default function AccountsPage() {
       return map[k];
     };
     filtered.forEach((r) => {
-      if (r.isVoid) return;
+      if (r.isVoid || r.isCancelled) return;
       const sellBucket = bucket(r.sellCurrency || "EGP");
       sellBucket.sales += r.origSell;
       sellBucket.salesEGP += r.sell;
@@ -649,7 +718,7 @@ export default function AccountsPage() {
 
   const bySection = useMemo(() => {
     return ["Flight", "Hotel", "Visa", "Transport"].map((sec) => {
-      const rows = filtered.filter((r) => r.section === sec && !r.isVoid);
+      const rows = filtered.filter((r) => r.section === sec && !r.isVoid && !r.isCancelled);
       let sales = 0,
         cost = 0,
         profit = 0,
@@ -667,7 +736,7 @@ export default function AccountsPage() {
   }, [filtered]);
 
   const credits = useMemo(
-    () => filtered.filter((r) => r.isRefund && !r.isVoid),
+    () => filtered.filter((r) => r.isRefund && !r.isVoid && !r.isCancelled),
     [filtered]
   );
 
@@ -678,7 +747,7 @@ export default function AccountsPage() {
     // Output VAT on service fees (agency commission/fee)
     let taxableFees = 0;
     filtered.forEach((r) => {
-      if (r.isVoid || r.isRefund) return;
+      if (r.isVoid || r.isCancelled || r.isRefund) return;
       taxableFees += Math.max(0, r.serviceFee || 0);
     });
     // Also approximate output on margin if no explicit service fee (common in tickets)
@@ -692,24 +761,29 @@ export default function AccountsPage() {
   }, [filtered, vatRate, totals.profit]);
 
   /* ── Real General Ledger: every balanced Dr/Cr line, from every source ──
-     - Auto-posted from each visible transaction (respects the same date/
-       search/section filters as the rest of the page — a Trial Balance
-       is always "as of" a period, so this is the correct behavior)
+     - Auto-posted from each visible transaction (respects the same
+       search/section/paid filters as the rest of the page, but each
+       posting's OWN date decides whether it falls in the selected period —
+       see buildTransactionJournalPostings and filteredForLedger above)
      - Manual journal entries (respecting the same date range)
      - Bank book movements (now double-entry via their contra account)     */
   const allLedgerLines = useMemo(() => {
     const lines = [];
 
-    filtered.forEach((r) => {
-      buildTransactionJournalLines(r).forEach((l) => {
-        lines.push({
-          ...l,
-          date: r.date,
-          memo: r.description,
-          ref: r.ref,
-          section: r.section,
-          source: "auto",
-          docId: r.docId,
+    filteredForLedger.forEach((r) => {
+      buildTransactionJournalPostings(r).forEach((posting) => {
+        if (dateFrom && posting.date && posting.date < dateFrom) return;
+        if (dateTo && posting.date && posting.date > dateTo) return;
+        posting.lines.forEach((l) => {
+          lines.push({
+            ...l,
+            date: posting.date,
+            memo: r.description,
+            ref: r.ref,
+            section: r.section,
+            source: "auto",
+            docId: r.docId,
+          });
         });
       });
     });
@@ -767,7 +841,7 @@ export default function AccountsPage() {
     });
 
     return lines;
-  }, [filtered, journals, bankLines, dateFrom, dateTo]);
+  }, [filteredForLedger, journals, bankLines, dateFrom, dateTo]);
 
   /* Trial Balance — every account, total debit / total credit / net
      balance. Sum of all debits always equals sum of all credits because
@@ -1764,7 +1838,7 @@ export default function AccountsPage() {
                     </thead>
                     <tbody>
                       {filtered.map((r) => (
-                        <tr key={r.id} className={`border-t hover:bg-slate-50 ${r.isRefund ? "bg-amber-50/40" : r.isVoid ? "opacity-40" : ""}`}>
+                        <tr key={r.id} className={`border-t hover:bg-slate-50 ${r.isRefund ? "bg-amber-50/40" : (r.isVoid || r.isCancelled) ? "opacity-40" : ""}`}>
                           <td className="px-2 py-1 whitespace-nowrap">{r.date || "—"}</td>
                           <td className="px-2 py-1"><span className="px-1 py-0.5 rounded bg-slate-100 text-[9px] font-semibold">{r.section}</span></td>
                           <td className="px-2 py-1 truncate max-w-[80px]">{r.clientName || "—"}</td>
@@ -1777,7 +1851,7 @@ export default function AccountsPage() {
                           <td className={`px-2 py-1 text-right font-medium tabular-nums ${r.sell < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt(r.sell)}</td>
                           <td className={`px-2 py-1 text-right font-semibold tabular-nums ${r.profit >= 0 ? "text-teal-600" : "text-red-600"}`}>{fmt(r.profit)}</td>
                           <td className="px-2 py-1 text-center text-[9px]">
-                            {r.isVoid ? "Void" : !r.invoiceIssued ? "Open" : r.invoicePaid ? <span className="text-emerald-600 font-semibold">Paid</span> : <span className="text-amber-600 font-semibold">AR</span>}
+                            {r.isVoid ? "Void" : r.isCancelled ? "Cancelled" : !r.invoiceIssued ? "Open" : r.invoicePaid ? <span className="text-emerald-600 font-semibold">Paid</span> : <span className="text-amber-600 font-semibold">AR</span>}
                           </td>
                         </tr>
                       ))}

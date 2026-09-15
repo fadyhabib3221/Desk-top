@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import Navbar from "@/components/Navbar";
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { generateInvoiceNumber, isBranchVisible } from "@/lib/helpers";
 import { useClosedFiscalYearKeys, isRowClosed } from "@/lib/fiscalYear";
@@ -32,8 +32,10 @@ export default function InvoicesPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showNewModal, setShowNewModal] = useState(false);
-  const [pendingFlights, setPendingFlights] = useState([]);
-  const [selectedPending, setSelectedPending] = useState("");
+  const [pendingItems, setPendingItems] = useState([]);
+  const [groupSection, setGroupSection] = useState("Flight");
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [issuingGroup, setIssuingGroup] = useState(false);
   const [viewInvoice, setViewInvoice] = useState(null);
   const [printPreview, setPrintPreview] = useState(null);
   const printRef = useRef(null);
@@ -79,7 +81,12 @@ export default function InvoicesPage() {
           raw: f,
         };
       }).filter((row) => isBranchVisible(row.branch, { isAdmin, activeBranch, myBranches }))
-        .filter((row) => !isRowClosed(row, closedYearKeys, "issueDate"));
+        .filter((row) => !isRowClosed(row, closedYearKeys, "issueDate"))
+        // A booking grouped into a combined multi-service invoice is
+        // already fully represented by that one combined "invoices" doc —
+        // listing it again here under its own module would double-count
+        // its amount in every stat and show it twice in the table.
+        .filter((row) => !row.raw?.isGroupedInvoice);
       setInvoices((prev) => {
         const others = prev.filter((x) => x.collection !== "flights");
         const merged = [...others, ...mapped].sort((a,b) => (b.issueDate||"").localeCompare(a.issueDate||""));
@@ -113,6 +120,7 @@ export default function InvoicesPage() {
         currency: f.currency || "EGP",
         invoicePaid: !!f.invoicePaid,
         paidDate: f.paidDate || "",
+        lines: f.lines || null,
         raw: f,
       })).filter((row) => isBranchVisible(row.branch, { isAdmin, activeBranch, myBranches }))
          .filter((row) => !isRowClosed(row, closedYearKeys, "issueDate"));
@@ -154,7 +162,8 @@ export default function InvoicesPage() {
               raw: f,
             };
           }).filter((row) => isBranchVisible(row.branch, { isAdmin, activeBranch, myBranches }))
-            .filter((row) => !isRowClosed(row, closedYearKeys, "issueDate"));
+            .filter((row) => !isRowClosed(row, closedYearKeys, "issueDate"))
+            .filter((row) => !row.raw?.isGroupedInvoice);
           setInvoices((prev) => {
             const others = prev.filter((x) => x.collection !== collName);
             const merged = [...others, ...mapped].sort((a,b) => (b.issueDate||"").localeCompare(a.issueDate||""));
@@ -174,15 +183,88 @@ export default function InvoicesPage() {
     return () => unsubs.forEach((u) => u && u());
   }, [isAdmin, activeBranch, JSON.stringify(myBranches), closedYearKeysToken]);
 
+  // "Pending" here always means: not yet invoiced, not void/cancelled, and
+  // not a refund row (grouping a refund in with normal sales into one
+  // combined invoice isn't a real scenario — refunds get their own credit
+  // note, issued individually from their own module).
   useEffect(() => {
     if (!showNewModal) return;
-    const unsub = onSnapshot(collection(db, "flights"), (snap) => {
-      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const pend = all.filter((f) => !f.invoiceIssued).slice(0, 100);
-      setPendingFlights(pend);
+    const unsubs = [];
+    const bySource = { flights: [], hotels: [], visa: [], transportation: [] };
+
+    const isExcluded = (f) =>
+      !!f.isRefundRow || String(f.status || "").toLowerCase().includes("void") || String(f.status || "").toLowerCase() === "cancelled";
+
+    const republish = () => {
+      const all = [...bySource.flights, ...bySource.hotels, ...bySource.visa, ...bySource.transportation]
+        .filter((row) => isBranchVisible(row.branch, { isAdmin, activeBranch, myBranches }))
+        .sort((a, b) => (b.issueDate || "").localeCompare(a.issueDate || ""));
+      setPendingItems(all);
+    };
+
+    const listen = (collName, section, describe, extra) => {
+      const u = onSnapshot(collection(db, collName), (snap) => {
+        bySource[collName] = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((f) => !f.invoiceIssued && !isExcluded(f))
+          .map((f) => ({
+            id: f.id,
+            collection: collName,
+            section,
+            description: describe(f),
+            clientName: f.clientName || f.clientCode || "—",
+            clientCode: f.clientCode || "",
+            currency: f.sellCurrency || f.currency || "EGP",
+            amount: parseFloat(f.totalSell ?? f.sellPrice ?? f.netPrice) || 0,
+            issueDate: f.issueDate || f.applicationDate || f.pickupDate || f.checkIn || "",
+            branch: f.branch || "1",
+            pax: f.pax || 1,
+            tax: extra ? extra(f) : 0,
+          }));
+        republish();
+      });
+      unsubs.push(u);
+    };
+
+    listen("flights", "Flight", (f) => `${f.airline || ""} ${f.pnr ? `(${f.pnr})` : ""} ${f.from || ""} → ${f.to || ""}`.trim(),
+      (f) => (parseFloat(f.taxes) || 0) + (parseFloat(f.taxesCHD) || 0) + (parseFloat(f.taxesINF) || 0));
+    listen("hotels", "Hotel", (f) => `${f.hotelName || f.city || "Hotel"}${f.checkIn ? ` — ${f.checkIn}` : ""}`);
+    listen("visa", "Visa", (f) => `${f.visaType || "Visa"} — ${f.country || ""}`);
+    listen("transportation", "Transport", (f) => `${f.vehicleType || "Transport"}${f.pickupDate ? ` — ${f.pickupDate}` : ""}`);
+
+    return () => unsubs.forEach((u) => u && u());
+  }, [showNewModal, isAdmin, activeBranch, JSON.stringify(myBranches)]);
+
+  // Which generateInvoiceNumber() "type" (and therefore which numbering
+  // prefix — INTE/IHSE/IVSE/ITSE) a group in this section gets, matching
+  // exactly what each module's own page uses for a single booking.
+  const SECTION_INVOICE_TYPE = { Flight: "ticket", Hotel: "hotel", Visa: "visa", Transport: "transportation" };
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [groupSection]);
+
+  const sectionPendingItems = useMemo(
+    () => pendingItems.filter((it) => it.section === groupSection),
+    [pendingItems, groupSection]
+  );
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
-    return () => unsub();
-  }, [showNewModal]);
+  };
+
+  const selectedItems = useMemo(
+    () => pendingItems.filter((it) => selectedIds.has(it.id)),
+    [pendingItems, selectedIds]
+  );
+  const selectedTotal = useMemo(() => selectedItems.reduce((s, it) => s + it.amount, 0), [selectedItems]);
+  const selectedCurrencies = useMemo(() => new Set(selectedItems.map((it) => it.currency)), [selectedItems]);
+  const selectedBranches = useMemo(() => new Set(selectedItems.map((it) => it.branch)), [selectedItems]);
 
   const filtered = useMemo(() => {
     return invoices.filter((inv) => {
@@ -313,26 +395,87 @@ export default function InvoicesPage() {
   };
 
   const handleCreateInvoice = async () => {
-    if (!selectedPending) { toast.error("Select a booking"); return; }
-    const flight = pendingFlights.find((f) => f.id === selectedPending);
-    if (!flight) return;
-    const curr = flight.sellCurrency || flight.currency || "EGP";
-    const invType = flight.isRefundRow ? "refund" : "ticket";
+    if (selectedItems.length === 0) { toast.error("Select at least one service"); return; }
+    if (selectedCurrencies.size > 1) { toast.error("Selected services must all be in the same currency"); return; }
+    if (selectedBranches.size > 1) { toast.error("Selected services must all be from the same branch"); return; }
+
+    setIssuingGroup(true);
     try {
-      const inv = await generateInvoiceNumber(invType, curr, flight.branch, flight.issueDate);
-      await updateDoc(doc(db, "flights", flight.id), {
-        invoiceNumber: inv.fullNumber,
-        numberPrefix: inv.numberPrefix,
-        sequentialNumber: inv.sequentialNumber,
-        invoiceIssued: true,
-        invoicePaid: false,
-        updatedAt: serverTimestamp(),
-      });
-      toast.success(`Invoice issued: ${inv.fullNumber}`);
+      const currency = selectedItems[0].currency;
+      const branch = selectedItems[0].branch;
+      const invoiceType = SECTION_INVOICE_TYPE[groupSection] || "service";
+      // Numbers the group as of the EARLIEST service date in the batch, so
+      // it always lands in that service's own fiscal year — same rule
+      // single-booking invoices already follow elsewhere in the app.
+      const earliestDate = selectedItems.reduce(
+        (min, it) => (it.issueDate && (!min || it.issueDate < min) ? it.issueDate : min),
+        ""
+      );
+
+      const inv = await generateInvoiceNumber(invoiceType, currency, branch, earliestDate);
+
+      if (selectedItems.length === 1) {
+        // Exactly one item: behaves just like issuing directly from that
+        // item's own module page — tag it, no separate combined doc needed.
+        const it = selectedItems[0];
+        await updateDoc(doc(db, it.collection, it.id), {
+          invoiceNumber: inv.fullNumber,
+          numberPrefix: inv.numberPrefix,
+          sequentialNumber: inv.sequentialNumber,
+          invoiceIssued: true,
+          invoicePaid: false,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await addDoc(collection(db, "invoices"), {
+          invoiceNumber: inv.fullNumber,
+          numberPrefix: inv.numberPrefix,
+          sequentialNumber: inv.sequentialNumber,
+          branch,
+          currency,
+          issueDate: new Date().toISOString().slice(0, 10),
+          section: groupSection,
+          clientName: [...new Set(selectedItems.map((it) => it.clientName))].join(", "),
+          totalSell: selectedTotal,
+          invoicePaid: false,
+          lines: selectedItems.map((it) => ({
+            collection: it.collection,
+            docId: it.id,
+            section: it.section,
+            description: it.description,
+            clientName: it.clientName,
+            amount: it.amount,
+            tax: it.tax || 0,
+            pax: it.pax,
+          })),
+          createdAt: serverTimestamp(),
+        });
+
+        // Tag every underlying booking with the SAME invoice number, and
+        // mark it as grouped so it isn't ALSO listed/counted on its own —
+        // it's fully represented by the combined doc above now.
+        await Promise.all(
+          selectedItems.map((it) =>
+            updateDoc(doc(db, it.collection, it.id), {
+              invoiceNumber: inv.fullNumber,
+              numberPrefix: inv.numberPrefix,
+              sequentialNumber: inv.sequentialNumber,
+              invoiceIssued: true,
+              invoicePaid: false,
+              isGroupedInvoice: true,
+              updatedAt: serverTimestamp(),
+            })
+          )
+        );
+      }
+
+      toast.success(`Invoice issued: ${inv.fullNumber} (${selectedItems.length} service${selectedItems.length > 1 ? "s" : ""})`);
       setShowNewModal(false);
-      setSelectedPending("");
+      setSelectedIds(new Set());
     } catch (e) {
-      toast.error("Failed to issue invoice: " + (e.message||""));
+      toast.error("Failed to issue invoice: " + (e.message || ""));
+    } finally {
+      setIssuingGroup(false);
     }
   };
 
@@ -557,13 +700,63 @@ export default function InvoicesPage() {
                   <div className="text-xs">{printPreview.currency}</div>
                 </div>
               </div>
-              <table className="w-full text-sm border rounded">
-                <thead className="bg-slate-100"><tr><th className="text-left p-2 border">Description</th><th className="text-right p-2 border">Amount</th></tr></thead>
-                <tbody>
-                  <tr><td className="p-2 border">{printPreview.section} — {printPreview.clientName}</td><td className="p-2 border text-right font-bold">{fmt(printPreview.amount)} {printPreview.currency}</td></tr>
-                </tbody>
-                <tfoot><tr className="bg-slate-50"><td className="p-2 border text-right font-bold">Total</td><td className="p-2 border text-right font-bold">{fmt(printPreview.amount)} {printPreview.currency}</td></tr></tfoot>
-              </table>
+              {(() => {
+                // Grouped invoices already carry their line items. A
+                // single-booking invoice (issued directly from its own
+                // module page, or a lone item from this modal) has none —
+                // synthesize one line from the fields already on it, same
+                // as before, but now shaped consistently with the grouped
+                // case so both render through the same table below.
+                const lines = printPreview.lines?.length
+                  ? printPreview.lines
+                  : [{
+                      description: `${printPreview.section} — ${printPreview.clientName}`,
+                      pax: printPreview.raw?.pax || 1,
+                      amount: printPreview.amount,
+                      tax:
+                        (parseFloat(printPreview.raw?.taxes) || 0) +
+                        (parseFloat(printPreview.raw?.taxesCHD) || 0) +
+                        (parseFloat(printPreview.raw?.taxesINF) || 0),
+                    }];
+                const sumAmount = lines.reduce((s, l) => s + (l.amount || 0), 0);
+                const sumTax = lines.reduce((s, l) => s + (l.tax || 0), 0);
+                const sumPax = lines.reduce((s, l) => s + (l.pax || 0), 0);
+                return (
+                  <table className="w-full text-sm border rounded">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="text-left p-2 border">#</th>
+                        <th className="text-left p-2 border">Description</th>
+                        <th className="text-right p-2 border">Pax</th>
+                        <th className="text-right p-2 border">Amount</th>
+                        <th className="text-right p-2 border">Tax</th>
+                        <th className="text-right p-2 border">Payable</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((l, i) => (
+                        <tr key={i}>
+                          <td className="p-2 border text-slate-500">{i + 1}</td>
+                          <td className="p-2 border">{l.description}{l.clientName && printPreview.lines?.length ? ` — ${l.clientName}` : ""}</td>
+                          <td className="p-2 border text-right">{l.pax || 1}</td>
+                          <td className="p-2 border text-right">{fmt(l.amount)}</td>
+                          <td className="p-2 border text-right">{fmt(l.tax || 0)}</td>
+                          <td className="p-2 border text-right font-semibold">{fmt((l.amount || 0) + (l.tax || 0))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-50 font-bold">
+                        <td className="p-2 border" colSpan={2}>Sum</td>
+                        <td className="p-2 border text-right">{sumPax}</td>
+                        <td className="p-2 border text-right">{fmt(sumAmount)}</td>
+                        <td className="p-2 border text-right">{fmt(sumTax)}</td>
+                        <td className="p-2 border text-right">{fmt(sumAmount + sumTax)} {printPreview.currency}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                );
+              })()}
               <div className="text-xs text-slate-500">Status: {printPreview.isCredit ? "Credit Note" : printPreview.invoicePaid ? "Paid" : "Unpaid"} • Generated from flights system</div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t">
@@ -577,30 +770,73 @@ export default function InvoicesPage() {
       {/* New Invoice Modal */}
       {showNewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-modal-backdrop">
-          <div className="bg-white rounded-xl w-full max-w-lg shadow-xl animate-modal-panel">
+          <div className="bg-white rounded-xl w-full max-w-2xl shadow-xl animate-modal-panel flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <h3 className="font-semibold text-sm flex items-center gap-2"><Plus size={16} /> Issue New Invoice</h3>
-              <button onClick={() => setShowNewModal(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+              <button onClick={() => { setShowNewModal(false); setSelectedIds(new Set()); }} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
             </div>
-            <div className="p-5 space-y-3">
-              <p className="text-xs text-slate-500">Select a pending booking without invoice. Will generate INTE/INTF/CNTE based on currency.</p>
-              <div className="max-h-64 overflow-auto border rounded-lg divide-y">
-                {pendingFlights.length === 0 ? (
-                  <div className="p-6 text-center text-slate-400 text-sm">No pending flights without invoice</div>
-                ) : pendingFlights.map((f) => (
-                  <label key={f.id} className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-blue-50 ${selectedPending===f.id ? "bg-blue-50" : ""}`}>
-                    <input type="radio" name="pending" checked={selectedPending===f.id} onChange={() => setSelectedPending(f.id)} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{f.clientName || f.clientCode} — {f.from} → {f.to}</div>
-                      <div className="text-xs text-slate-500 font-mono truncate">{f.passengers?.[0]?.ticketNr || ""} | {f.sellCurrency || f.currency || "EGP"} {fmt(f.totalSell ?? f.sellPrice)}</div>
-                    </div>
-                    <span className="text-xs px-2 py-1 rounded bg-slate-100">{f.issueDate || ""}</span>
-                  </label>
-                ))}
+            <div className="p-5 space-y-3 overflow-y-auto">
+              <p className="text-xs text-slate-500">
+                Pick a section, then select any number of its non-invoiced services to group into one invoice
+                (numbered under that section's own series — e.g. Flight groups get an INTE/INTF number).
+              </p>
+              <div className="flex gap-1.5">
+                {["Flight", "Hotel", "Visa", "Transport"].map((sec) => {
+                  const count = pendingItems.filter((it) => it.section === sec).length;
+                  return (
+                    <button
+                      key={sec}
+                      onClick={() => setGroupSection(sec)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
+                        groupSection === sec ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {sec} {count > 0 && <span className="opacity-70">({count})</span>}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowNewModal(false)} className="px-4 py-2 text-sm border rounded-lg">Cancel</button>
-                <button onClick={handleCreateInvoice} disabled={!selectedPending} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-50">Issue Invoice</button>
+              <div className="max-h-80 overflow-auto border rounded-lg divide-y">
+                {sectionPendingItems.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 text-sm">No pending {groupSection.toLowerCase()} services without invoice</div>
+                ) : sectionPendingItems.map((it) => {
+                  const checked = selectedIds.has(it.id);
+                  return (
+                    <label key={it.id} className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-blue-50 ${checked ? "bg-blue-50" : ""}`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleSelected(it.id)} />
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium shrink-0">{it.section}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{it.clientName} — {it.description}</div>
+                        <div className="text-xs text-slate-500 font-mono truncate">{it.currency} {fmt(it.amount)}</div>
+                      </div>
+                      <span className="text-xs px-2 py-1 rounded bg-slate-100 shrink-0">{it.issueDate || ""}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {selectedItems.length > 0 && (
+                <div className="bg-slate-50 border rounded-lg p-3 text-sm flex items-center justify-between">
+                  <span className="text-slate-600">{selectedItems.length} service{selectedItems.length > 1 ? "s" : ""} selected</span>
+                  <span className="font-semibold">{selectedItems[0]?.currency} {fmt(selectedTotal)}</span>
+                </div>
+              )}
+              {selectedCurrencies.size > 1 && (
+                <p className="text-xs text-red-600">Selected services have mixed currencies — narrow your selection to one currency.</p>
+              )}
+              {selectedBranches.size > 1 && (
+                <p className="text-xs text-red-600">Selected services are from different branches — narrow your selection to one branch.</p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => { setShowNewModal(false); setSelectedIds(new Set()); }} className="px-4 py-2 text-sm border rounded-lg">Cancel</button>
+                <button
+                  onClick={handleCreateInvoice}
+                  disabled={selectedItems.length === 0 || selectedCurrencies.size > 1 || selectedBranches.size > 1 || issuingGroup}
+                  className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-50"
+                >
+                  {issuingGroup ? "Issuing..." : selectedItems.length > 1 ? `Issue Combined Invoice (${selectedItems.length})` : "Issue Invoice"}
+                </button>
               </div>
             </div>
           </div>
